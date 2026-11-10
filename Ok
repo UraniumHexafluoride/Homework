@@ -1,0 +1,236 @@
+\documentclass[11pt, a4paper]{article}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{fontspec}
+\usepackage[english, bidi=basic, provide=*]{babel}
+\babelprovide[import, onchar=ids fonts]{english}
+\babelfont{rm}{Noto Sans}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{mdframed}
+\usepackage{hyperref}
+
+\definecolor{bookblue}{RGB}{20, 50, 90}
+\definecolor{bookgray}{RGB}{245, 247, 250}
+\definecolor{darkgray}{RGB}{70, 70, 70}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=bookblue,
+    citecolor=bookblue,
+    urlcolor=bookblue
+}
+
+\mdfdefinestyle{examplebox}{
+    backgroundcolor=bookgray,
+    linecolor=bookblue,
+    linewidth=1.5pt,
+    topline=true,
+    bottomline=true,
+    leftline=true,
+    rightline=true,
+    innerleftmargin=12pt,
+    innerrightmargin=12pt,
+    innertopmargin=10pt,
+    innerbottommargin=10pt,
+    marginstep=10pt
+}
+
+\mdfdefinestyle{infobox}{
+    backgroundcolor=white,
+    linecolor=darkgray,
+    linewidth=0.8pt,
+    innerleftmargin=10pt,
+    innerrightmargin=10pt,
+    innertopmargin=8pt,
+    innerbottommargin=8pt
+}
+
+\begin{document}
+
+\raggedbottom
+
+% --- CHAPTER HEADER ---
+\noindent {\LARGE \textbf{\color{bookblue} Chapter 12}} \\[0.5em]
+\noindent {\Huge \textbf{\color{bookblue} Kinematic \& Physical Modeling of Towed Acoustic Arrays}} \\[0.8em]
+\noindent {\Large \textbf{3D Shape Reconstruction from Non-Acoustic Sensor (NAS) Data}} \\[1.5em]
+\hr
+\vspace{1em}
+
+\section{Introduction \& System Overview}
+
+In underwater acoustics and naval hydrodynamics, determining the precise spatial coordinates $(x, y, z)$ of hydrophone array elements is essential for beamforming, target localization, and bearing estimation. Traditional kinematic estimators—such as the discrete tractrix model implemented in routines like \texttt{chainlink.m}—rely solely on towing vessel (ownship) motion. They treat the array as a friction-free follow-the-leader chain dragged behind the vessel.
+
+While kinematic pursuit models predict array behavior reasonably well on steady courses, they suffer from significant lag and trajectory inaccuracies during ship maneuvers. Moreover, simple 2D models completely ignore vertical deflection, hydrodynamic droop, and pitch variations.
+
+To overcome these limitations, modern towed systems embed \textbf{Non-Acoustic Sensor (NAS)} nodes along the array cable. Each node measures local physical orientations (heading, pitch, roll) and hydrostatic pressure. This chapter provides a rigorous mathematical formulation for reconstructing the full 3D shape of an array directly from discrete NAS telemetry.
+
+\begin{mdframed}[style=infobox]
+\textbf{Key Objectives Covered in This Chapter:}
+\begin{itemize}[leftmargin=1.5em, itemsep=2pt]
+    \item Transformation from body-fixed orientation angles to global geographic tangent vectors.
+    \item Continuous 3D spatial curve integration along array arc length $s$.
+    \item High-precision numerical midpoint integration and angle unwrapping techniques.
+    \item Hydrostatic pressure fusion for depth pinning and pitch-integration drift correction.
+    \item Step-by-step numerical baseline calculation for array position estimation.
+\end{itemize}
+\end{mdframed}
+
+\section{Coordinate Systems \& Tangent Vector Formulations}
+
+We define a global right-handed East-North-Down (END) coordinate system centered at a suitable geodetic origin:
+\begin{itemize}[leftmargin=2em]
+    \item $x$-axis: Direction of East ($\text{m}$)
+    \item $y$-axis: Direction of North ($\text{m}$)
+    \item $z$-axis: Depth below surface ($\text{m}$, positive downwards)
+\end{itemize}
+
+Let $s \in [0, L]$ denote the spatial arc length along the array cable, measured from the cable/array junction (the array nose, $s = 0$) aft toward the tail ($s = L$).
+
+At any point $s$ along the array, the local forward unit vector $\mathbf{f}(s)$ points forward (toward the ship). In terms of true heading $\psi(s)$ (clockwise from North in radians) and pitch angle $\theta(s)$ (positive nose-up in radians), $\mathbf{f}(s)$ is defined as:
+\begin{equation}
+\mathbf{f}(s) = \begin{bmatrix} f_x(s) \\[0.2em] f_y(s) \\[0.2em] f_z(s) \end{bmatrix} = \begin{bmatrix} \cos\theta(s) \sin\psi(s) \\[0.2em] \cos\theta(s) \cos\psi(s) \\[0.2em] -\sin\theta(s) \end{bmatrix}
+\end{equation}
+
+Because arc length $s$ is measured \textbf{aft} (from nose to tail), the spatial derivative of the position vector $\mathbf{r}(s) = [x(s), y(s), z(s)]^T$ points opposite to the forward unit vector $\mathbf{f}(s)$:
+\begin{equation}
+\frac{d\mathbf{r}}{ds} = -\mathbf{f}(s) = \begin{bmatrix} -\cos\theta(s) \sin\psi(s) \\[0.2em] -\cos\theta(s) \cos\psi(s) \\[0.2em] \sin\theta(s) \end{bmatrix}
+\end{equation}
+
+\section{Continuous Spatial Integration Theory}
+
+By Fundamental Theorem of Calculus, integrating the differential vector $d\mathbf{r}/ds$ from the nose position $\mathbf{r}_0 = [x_0, y_0, z_0]^T$ at $s = 0$ out to any arbitrary arc length $s$ yields the continuous spatial position equations:
+
+\begin{align}
+x(s) &= x_0 - \int_{0}^{s} \cos\theta(\sigma) \sin\psi(\sigma) \, d\sigma \label{eq:x_int} \\[0.5em]
+y(s) &= y_0 - \int_{0}^{s} \cos\theta(\sigma) \cos\psi(\sigma) \, d\sigma \label{eq:y_int} \\[0.5em]
+z_{\text{int}}(s) &= z_0 + \int_{0}^{s} \sin\theta(\sigma) \, d\sigma \label{eq:z_int}
+\end{align}
+
+Where $z_{\text{int}}(s)$ represents the uncorrected integrated depth profile obtained strictly from the pitch sensor integration.
+
+\section{Discrete Numerical Integration Algorithm}
+
+In practice, orientation sensors are deployed at $M$ discrete nodes along the array at arc lengths $s_1 < s_2 < \dots < s_M$. To compute array element locations on a fine discretization grid $s_0, s_1, \dots, s_N$ with sub-interval step sizes $\Delta s_k = s_k - s_{k-1}$, we employ a second-order Midpoint Integration Scheme.
+
+\subsection{Phase Angle Unwrapping \& Interpolation}
+Because raw compass headings wrap across the $[0, 2\pi)$ boundary, heading values must first be unwrapped to produce a continuous function $\psi(s)$. Angle profiles $\psi(s)$ and $\theta(s)$ are interpolated across node locations using Piecewise Cubic Hermite Interpolating Polynomials (\texttt{pchip}) to maintain smooth derivatives without unphysical overshoots.
+
+\subsection{Midpoint Vector Integration}
+For a segment bounded by $s_{k-1}$ and $s_k$, the effective midpoint angles are:
+\begin{equation}
+\bar{\psi}_k = \frac{\psi(s_{k-1}) + \psi(s_k)}{2}, \qquad \bar{\theta}_k = \frac{\theta(s_{k-1}) + \theta(s_k)}{2}
+\end{equation}
+
+The incremental spatial steps $(\Delta x_k, \Delta y_k, \Delta z_k)$ over distance $\Delta s_k$ are given by:
+\begin{align}
+\Delta x_k &= -\Delta s_k \cos(\bar{\theta}_k) \sin(\bar{\psi}_k) \\
+\Delta y_k &= -\Delta s_k \cos(\bar{\theta}_k) \cos(\bar{\psi}_k) \\
+\Delta z_k &= +\Delta s_k \sin(\bar{\theta}_k)
+\end{align}
+
+Accumulating these increments gives discrete grid coordinates:
+\begin{equation}
+x_k = x_0 + \sum_{j=1}^{k} \Delta x_j, \qquad y_k = y_0 + \sum_{j=1}^{k} \Delta y_j, \qquad z_{\text{int}, k} = z_0 + \sum_{j=1}^{k} \Delta z_j
+\end{equation}
+
+\section{Hydrostatic Depth Pinning \& Residual Correction}
+
+Direct numerical integration of pitch sensor readings accumulates biases and low-frequency noise over long arrays ($L \approx 500\text{ m}$), leading to vertical drift. To eliminate this accumulation error, hydrostatic pressure readings $P_j$ measured at each NAS node are converted to true physical depth $z_{\text{meas}, j}$.
+
+\subsection{Pressure-to-Depth Conversion}
+Hydrostatic pressure $P$ at depth $z$ is expressed as:
+\begin{equation}
+P = P_{\text{atm}} + \rho \, g \, z
+\end{equation}
+Solving for physical depth $z_{\text{meas}, j}$ at node $j$:
+\begin{equation}
+z_{\text{meas}, j} = \frac{P_j - P_{\text{atm}}}{\rho \, g}
+\end{equation}
+where $\rho \approx 1025\text{ kg/m}^3$ is seawater density, $g = 9.81\text{ m/s}^2$ is gravitational acceleration, and $P_{\text{atm}} = 101,325\text{ Pa}$ is standard atmospheric pressure.
+
+\subsection{Residual Interpolation \& Depth Fusion}
+At each NAS node location $s_j$, the depth residual $r_j$ between the pressure measurement and the integrated pitch depth is evaluated:
+\begin{equation}
+r_j = z_{\text{meas}, j} - z_{\text{int}}(s_j)
+\end{equation}
+
+This residual vector $\mathbf{r} = [r_1, r_2, \dots, r_M]^T$ is interpolated linearly across all array arc lengths $s$ to form a smooth correction profile $c(s)$. The final pinned depth $z_{\text{final}}(s)$ across all acoustic elements is:
+\begin{equation}
+z_{\text{final}}(s) = z_{\text{int}}(s) + c(s)
+\end{equation}
+
+Notice that $c(s_1)$ automatically absorbs any initial uncertainty in the nose depth $z_0$, effectively tying the entire vertical array shape directly to absolute pressure references.
+
+\newpage
+
+\section{Detailed Numerical Worked Example}
+
+\begin{mdframed}[style=examplebox]
+\noindent {\color{bookblue} \textbf{Example 12.1: 3D Coordinate Calculation for a Two-Node Array Segment}} \\[0.5em]
+\textbf{Problem Statement:} \\
+A towed acoustic array has its cable nose ($s = 0\text{ m}$) located at geographic position:
+$$x_0 = 100.000\text{ m (East)}, \quad y_0 = 200.000\text{ m (North)}, \quad z_0 = 15.000\text{ m (Depth)}$$
+
+Two NAS nodes are positioned along the array segment at arc lengths $s_1 = 0.0\text{ m}$ and $s_2 = 10.0\text{ m}$ ($\Delta s = 10.0\text{ m}$). The sensor field data provides the following readings:
+\begin{itemize}[itemsep=2pt]
+    \item \textbf{Node 1 ($s_1 = 0\text{ m}$):} Heading $\psi_1 = 90.0^\circ$ ($1.57080\text{ rad}$), Pitch $\theta_1 = +2.0^\circ$ ($0.03491\text{ rad}$)
+    \item \textbf{Node 2 ($s_2 = 10\text{ m}$):} Heading $\psi_2 = 102.0^\circ$ ($1.78024\text{ rad}$), Pitch $\theta_2 = +4.0^\circ$ ($0.06981\text{ rad}$)
+    \item \textbf{Pressure at Node 2 ($s_2 = 10\text{ m}$):} $P_2 = 257,511\text{ Pa}$
+\end{itemize}
+Compute the exact 3D coordinates $(x, y, z)$ at $s = 10.0\text{ m}$ using midpoint integration and hydrostatic depth pinning.
+\\[0.8em]
+\textbf{Solution Step-by-Step:}
+
+\noindent \textbf{Step 1: Compute Midpoint Angles}
+$$\bar{\psi} = \frac{90.0^\circ + 102.0^\circ}{2} = 96.0^\circ \quad \longrightarrow \quad 1.67552\text{ rad}$$
+$$\bar{\theta} = \frac{2.0^\circ + 4.0^\circ}{2} = 3.0^\circ \quad \longrightarrow \quad 0.05236\text{ rad}$$
+
+\noindent \textbf{Step 2: Evaluate Trigonometric Terms}
+$$\cos(\bar{\theta}) = \cos(0.05236) = 0.99863, \qquad \sin(\bar{\theta}) = \sin(0.05236) = 0.05234$$
+$$\sin(\bar{\psi}) = \sin(1.67552) = 0.99452, \qquad \cos(\bar{\psi}) = \cos(1.67552) = -0.10453$$
+
+\noindent \textbf{Step 3: Compute Spatial Increments ($\Delta s = 10.0\text{ m}$)}
+$$\Delta x = -\Delta s \cdot \cos(\bar{\theta}) \sin(\bar{\psi}) = -10.0 \times 0.99863 \times 0.99452 = -9.9316\text{ m}$$
+$$\Delta y = -\Delta s \cdot \cos(\bar{\theta}) \cos(\bar{\psi}) = -10.0 \times 0.99863 \times (-0.10453) = +1.0439\text{ m}$$
+$$\Delta z_{\text{int}} = +\Delta s \cdot \sin(\bar{\theta}) = +10.0 \times 0.05234 = +0.5234\text{ m}$$
+
+\noindent \textbf{Step 4: Calculate Raw Unpinned Position at $s = 10.0\text{ m}$}
+$$x(10) = x_0 + \Delta x = 100.000 - 9.9316 = \mathbf{90.0684\text{ m}}$$
+$$y(10) = y_0 + \Delta y = 200.000 + 1.0439 = \mathbf{201.0439\text{ m}}$$
+$$z_{\text{int}}(10) = z_0 + \Delta z_{\text{int}} = 15.000 + 0.5234 = \mathbf{15.5234\text{ m}}$$
+
+\noindent \textbf{Step 5: Hydrostatic Pressure Pinning} \\
+Convert node 2 pressure measurement $P_2 = 257,511\text{ Pa}$ to measured physical depth:
+$$z_{\text{meas}}(10) = \frac{257,511 - 101,325}{1025 \times 9.81} = \frac{156,186}{10,055.25} = 15.5328\text{ m}$$
+
+Evaluate residual error $r_2$ at node 2:
+$$r_2 = z_{\text{meas}}(10) - z_{\text{int}}(10) = 15.5328 - 15.5234 = +0.0094\text{ m}$$
+
+Adding the correction residual yields the final pinned depth:
+$$z_{\text{final}}(10) = z_{\text{int}}(10) + r_2 = 15.5234 + 0.0094 = \mathbf{15.5328\text{ m}}$$
+\end{mdframed}
+
+\section{Summary of Equations}
+
+\begin{table}[h!]
+\centering
+\caption{Core Mathematical Equations for 3D Towed Array Reconstruction}
+\vspace{0.5em}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Quantity} & \textbf{Mathematical Formula} & \textbf{Equation Reference} \\ \midrule
+Forward Tangent Vector & $\mathbf{f}(s) = [\cos\theta \sin\psi, \; \cos\theta \cos\psi, \; -\sin\theta]^T$ & Eq. (1) \\[0.4em]
+Horizontal Coordinates & $x(s) = x_0 - \int_{0}^{s} \cos\theta \sin\psi \, d\sigma$ & Eq. (3) \\[0.4em]
+Vertical Coordinate & $y(s) = y_0 - \int_{0}^{s} \cos\theta \cos\psi \, d\sigma$ & Eq. (4) \\[0.4em]
+Integrated Depth & $z_{\text{int}}(s) = z_0 + \int_{0}^{s} \sin\theta \, d\sigma$ & Eq. (5) \\[0.4em]
+Hydrostatic Pressure Depth & $z_{\text{meas}} = (P - P_{\text{atm}}) / (\rho \, g)$ & Eq. (10) \\[0.4em]
+Pinned Depth Output & $z_{\text{final}}(s) = z_{\text{int}}(s) + c(s)$ & Eq. (12) \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
